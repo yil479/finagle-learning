@@ -32,7 +32,12 @@ object MessageTemplates {
   // a String - e.g. for FlightDelayed: Map("flightId" -> flightId,
   // "delayMinutes" -> delayMinutes.toString). Numbers need `.toString`
   // since every value here has to be a String.
-  private def placeholdersFor(event: TravelEvent): Map[String, String] = event match {
+  //
+  // Not private: the new editable-template feature reuses this exact
+  // placeholder-building logic for the customer-facing email/SMS content
+  // in DeliveryService, rather than duplicating the same match a second
+  // time - same fields, same event, same substitution mechanism.
+  def placeholdersFor(event: TravelEvent): Map[String, String] = event match {
   case FlightDelayed(_, flightId, delayMinutes, _, _) =>
     Map("flightId" -> flightId, "delayMinutes" -> delayMinutes.toString)
 
@@ -55,7 +60,7 @@ object MessageTemplates {
   // step. Spring/Java comparison: like a for-loop that reassigns a
   // `String result` variable each pass, except nothing is actually
   // mutated - each step produces a new String, handed to the next step.
-  private def render(template: String, placeholders: Map[String, String]): String =
+  def render(template: String, placeholders: Map[String, String]): String =
     placeholders.foldLeft(template) {
       case (soFar, (key, value)) => soFar.replace(s"{$key}", value)
     }

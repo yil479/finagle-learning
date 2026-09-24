@@ -1,6 +1,6 @@
 package com.travelmsg.server
 
-import com.travelmsg.http.{DecisionController, TravelerProfileController}
+import com.travelmsg.http.{DecisionController, MessageTemplateController, TravelerProfileController}
 import com.twitter.finatra.http.HttpServer
 import com.twitter.finatra.http.routing.HttpRouter
 
@@ -14,5 +14,6 @@ class TravelMessageServer extends HttpServer {
   override def configureHttp(router: HttpRouter): Unit = {
     router.add[DecisionController]
     router.add[TravelerProfileController]
+    router.add[MessageTemplateController]
   }
 }

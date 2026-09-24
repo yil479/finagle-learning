@@ -41,7 +41,10 @@ class MessageSender {
   // to happen once, so it runs at construction time, not per-send.
   sesClient.verifyEmailIdentity(VerifyEmailIdentityRequest.builder().emailAddress(FromAddress).build())
 
-  def sendEmail(to: String, subject: String, body: String): Unit = {
+  // Sends both a plain-text and an HTML body together - standard email
+  // practice: clients/screen readers that don't render HTML fall back to
+  // the plain-text part, instead of showing broken markup or nothing.
+  def sendEmail(to: String, subject: String, textBody: String, htmlBody: String): Unit = {
     val request = SendEmailRequest
       .builder()
       .source(FromAddress)
@@ -50,7 +53,12 @@ class MessageSender {
         Message
           .builder()
           .subject(Content.builder().data(subject).build())
-          .body(Body.builder().text(Content.builder().data(body).build()).build())
+          .body(
+            Body
+              .builder()
+              .text(Content.builder().data(textBody).build())
+              .html(Content.builder().data(htmlBody).build())
+              .build())
           .build())
       .build()
     sesClient.sendEmail(request)

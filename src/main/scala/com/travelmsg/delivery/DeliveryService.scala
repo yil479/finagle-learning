@@ -1,7 +1,8 @@
 package com.travelmsg.delivery
 
 import com.travelmsg.domain.{Decision, FlightCancelled, Send, Suppress, TravelEvent}
-import com.travelmsg.persistence.TravelerProfileStore
+import com.travelmsg.persistence.{MessageTemplateStore, TravelerProfileStore}
+import com.travelmsg.service.MessageTemplates
 import com.twitter.util.{Future, FuturePool}
 
 import javax.inject.Inject
@@ -19,7 +20,10 @@ import scala.util.control.NonFatal
  * with a reason, same as every other "didn't send, here's why" case in
  * this project - the audit trail matters here too.
  */
-class DeliveryService @Inject() (profileStore: TravelerProfileStore, sender: MessageSender) {
+class DeliveryService @Inject() (
+  profileStore: TravelerProfileStore,
+  templateStore: MessageTemplateStore,
+  sender: MessageSender) {
 
   private val pool: FuturePool = FuturePool.unboundedPool
   private val MaxAttempts = 3
@@ -52,13 +56,29 @@ class DeliveryService @Inject() (profileStore: TravelerProfileStore, sender: Mes
       case None =>
         Future.value(Suppress("No contact info on file for traveler"))
       case Some(profile) =>
-        val attempt = channelFor(event) match {
-          case Channel.Email => pool { sender.sendEmail(profile.email, "Travel update", send.message) }
-          case Channel.Sms => pool { sender.sendSms(profile.phone, send.message) }
+        pool { templateStore.find(event.getClass.getSimpleName) }.flatMap { templateOpt =>
+          // No error handling for a missing template: MessageTemplateStore
+          // seeds all four event types at startup, so this can't actually
+          // happen - trusting that invariant rather than guarding against
+          // a case that can't occur.
+          val template = templateOpt.get
+          val placeholders = MessageTemplates.placeholdersFor(event)
+
+          val attempt = channelFor(event) match {
+            case Channel.Email =>
+              val subject = MessageTemplates.render(template.emailSubject, placeholders)
+              val textBody = MessageTemplates.render(template.emailBodyText, placeholders)
+              val htmlBody = MessageTemplates.render(template.emailBodyHtml, placeholders)
+              pool { sender.sendEmail(profile.email, subject, textBody, htmlBody) }
+            case Channel.Sms =>
+              val smsBody = MessageTemplates.render(template.smsBody, placeholders)
+              pool { sender.sendSms(profile.phone, smsBody) }
+          }
+
+          withRetries(MaxAttempts)(attempt)
+            .map(_ => send)
+            .rescue { case NonFatal(e) => Future.value(Suppress(s"Delivery failed: ${e.getMessage}")) }
         }
-        withRetries(MaxAttempts)(attempt)
-          .map(_ => send)
-          .rescue { case NonFatal(e) => Future.value(Suppress(s"Delivery failed: ${e.getMessage}")) }
     }
   }
 }
