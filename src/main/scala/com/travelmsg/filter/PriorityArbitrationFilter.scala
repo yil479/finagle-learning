@@ -7,6 +7,7 @@ import com.twitter.util.{Duration, Future, Time}
 
 import scala.collection.concurrent.TrieMap
 import com.travelmsg.domain.FlightCancelled
+import com.travelmsg.trace.Trace
 
 /**
  * A second Filter in front of DecisionService, same shape as
@@ -57,8 +58,10 @@ class PriorityArbitrationFilter extends SimpleFilter[TravelEvent, Decision] {
         lastSentEvent.get(travelerId) match {
           case Some((priorEvent, priorTime))
               if Time.now - priorTime < ArbitrationWindow && priorityOf(priorEvent) > priorityOf(event) =>
-            Suppress(s"Lower priority than an active ${priorEvent.getClass.getSimpleName} for this traveler")
+              Trace.record(s"PriorityArbitrationFilter: lost to active ${priorEvent.getClass.getSimpleName}")
+              Suppress(s"Lower priority than an active ${priorEvent.getClass.getSimpleName} for this traveler")
           case _ =>
+            Trace.record("PriorityArbitrationFilter: no higher-priority competitor, recording send")
             lastSentEvent.update(travelerId, (event, Time.now))
             send
         }

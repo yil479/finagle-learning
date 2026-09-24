@@ -6,6 +6,7 @@ import com.twitter.finagle.{Service, SimpleFilter}
 import com.twitter.util.{Duration, Future, Time}
 
 import scala.collection.concurrent.TrieMap
+import com.travelmsg.trace.Trace
 
 /**
  * `SimpleFilter[Req, Rep]` is Finagle's abstract class for a `Filter` that
@@ -50,15 +51,19 @@ class FrequencyCapFilter extends SimpleFilter[TravelEvent, Decision] {
   // no field binding needed. Remember to import TransactionalEvent.
   override def apply(event: TravelEvent, service: Service[TravelEvent, Decision]): Future[Decision] =
   event match {
-    case _: BypassesFrequencyCap => service(event)
+    case _: BypassesFrequencyCap => 
+      Trace.record("FrequencyCapFilter: bypassed (transactional)")
+      service(event)
     case _ =>
       val travelerId = event.travelerId
       service(event).map {
         case send @ Send(_, _) =>
           lastSentAt.get(travelerId) match {
             case Some(lastSent) if Time.now - lastSent < CapWindow =>
+              Trace.record(s"FrequencyCapFilter: capped, already sent within the last $CapWindow")
               Suppress(s"Frequency capped: already sent to $travelerId within the last $CapWindow")
             case _ =>
+              Trace.record("FrequencyCapFilter: not capped, recording send")
               lastSentAt.update(travelerId, Time.now)
               send
           }

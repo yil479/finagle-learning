@@ -6,6 +6,7 @@ import com.twitter.util.Future
 
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import com.travelmsg.trace.Trace
 
 /**
  * Third Filter in the pipeline, and the innermost one (closest to
@@ -63,14 +64,18 @@ class QuietHoursFilter extends SimpleFilter[TravelEvent, Decision] {
   // as the fallback case. Remember to import TransactionalEvent.
   override def apply(event: TravelEvent, service: Service[TravelEvent, Decision]): Future[Decision] =
   event match {
-    case _: BypassesQuietHours => service(event)
+    case _: BypassesQuietHours =>
+      Trace.record("QuietHoursFilter: bypassed (transactional)") 
+      service(event)
     case _ =>
       service(event).map {
         case send @ Send(_, _) =>
           val now = currentTime(ZoneId.of(event.timezone))
           if (isQuietHours(now)) {
+            Trace.record(s"QuietHoursFilter: currently quiet hours in ${event.timezone}, held")
             Suppress(s"Quiet hours in ${event.timezone} - message held")
           } else {
+            Trace.record("QuietHoursFilter: not quiet hours, proceeding")
             send
           }
         case suppress: Suppress => suppress

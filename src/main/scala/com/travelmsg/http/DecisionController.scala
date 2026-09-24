@@ -4,6 +4,7 @@ import com.travelmsg.delivery.DeliveryService
 import com.travelmsg.domain.{Decision, FlightCancelled, FlightDelayed, PriceDropped, Send, Suppress, TravelEvent, TripStartingSoon}
 import com.travelmsg.filter.{FrequencyCapFilter, IdempotencyFilter, PriorityArbitrationFilter, QuietHoursFilter}
 import com.travelmsg.service.{DecisionLogger, DecisionService}
+import com.travelmsg.trace.Trace
 import com.twitter.finagle.Service
 import com.twitter.finatra.http.Controller
 import com.twitter.util.Future
@@ -80,6 +81,13 @@ object DecisionResponse {
   }
 }
 
+// Separate from DecisionResponse, not an added field on it: adding `trace`
+// to DecisionResponse itself would show up on every real response too
+// (even as an empty list), breaking every existing test's exact
+// withJsonBody match. A dry-run needs its own response shape and its own
+// routes, not a flag on the existing ones.
+case class DryRunResponse(decision: String, detail: String, trace: List[String])
+
 /**
  * Thin shell: decode JSON, delegate to the Service, encode the result.
  * No decision logic lives here - that's DecisionService's job, and that's
@@ -137,6 +145,28 @@ class DecisionController @Inject() (
       .flatMap(decision => decisionLogger.log(event, decision))
       .map(DecisionResponse.fromDomain)
 
+  // Dry-run: same pipeline, but no delivery and no send-log entry - this
+  // is a simulation, nothing should actually happen. `Trace.withRecording`
+  // turns trace capture on for exactly this one call; the same filters
+  // that silently no-op their `Trace.record` calls on the real path now
+  // actually record into the buffer this reads back via `Trace.current`.
+  //
+  // Known limitation, worth knowing about: this still runs through the
+  // *real* pipeline instance - the same frequency-cap/arbitration/
+  // idempotency state a real request would touch. A dry run isn't fully
+  // side-effect-free; it can still mark an event_id as seen, or count
+  // against a traveler's frequency cap. Making it truly side-effect-free
+  // would mean threading a "dry run" flag through every Filter, which is
+  // exactly the kind of invasive change using Trace/Contexts.local was
+  // meant to avoid - not worth it for what this slice needs.
+  private def dryRun(event: TravelEvent): Future[DryRunResponse] =
+    Trace.withRecording {
+      pipeline(event).map { decision =>
+        val response = DecisionResponse.fromDomain(decision)
+        DryRunResponse(response.decision, response.detail, Trace.current)
+      }
+    }
+
   post("/decisions") { request: DecisionRequest =>
     decide(request.toDomain)
   }
@@ -151,5 +181,21 @@ class DecisionController @Inject() (
 
   post("/decisions/flight-cancelled") { request: FlightCancelledRequest =>
     decide(request.toDomain)
+  }
+
+  post("/decisions/dry-run") { request: DecisionRequest =>
+    dryRun(request.toDomain)
+  }
+
+  post("/decisions/price-dropped/dry-run") { request: PriceDroppedRequest =>
+    dryRun(request.toDomain)
+  }
+
+  post("/decisions/trip-starting-soon/dry-run") { request: TripStartingSoonRequest =>
+    dryRun(request.toDomain)
+  }
+
+  post("/decisions/flight-cancelled/dry-run") { request: FlightCancelledRequest =>
+    dryRun(request.toDomain)
   }
 }

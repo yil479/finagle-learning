@@ -180,4 +180,40 @@ class DecisionControllerFeatureTest extends FeatureTest {
     assert(entry.get.decision == "send")
     assert(entry.get.detail == "Flight UA321 is delayed 45 minutes")
   }
+
+  test("Dry-run returns the full decision trace without delivering anything") {
+    // No traveler profile registered for traveler-8 - and this still
+    // succeeds, since dry-run never reaches DeliveryService at all. Every
+    // trace entry's exact wording is deterministic for these inputs
+    // (unlike eventId/timestamp elsewhere), so this can use an exact
+    // withJsonBody match.
+    //
+    // Trace order is NOT simple outermost-to-innermost - each filter
+    // records either before or after calling deeper into the chain,
+    // depending on where in its own code the Trace.record call sits.
+    // IdempotencyFilter and QuietHoursFilter's bypass branch both record
+    // *before* delegating (pre-order); FrequencyCapFilter and
+    // PriorityArbitrationFilter both record *after* the inner chain
+    // resolves, inside their own `.map` (post-order) - so the innermost
+    // ones settle first even though they're deepest in the pipeline.
+    // FlightDelayed bypasses quiet hours (per Slice 6), so QuietHoursFilter
+    // hits its bypass branch here, not the "not quiet hours" one.
+    server.httpPost(
+      path = "/decisions/dry-run",
+      postBody =
+        s"""{"traveler_id": "traveler-8", "flight_id": "UA654", "delay_minutes": 45, "timezone": "UTC", "event_id": "${UUID.randomUUID()}"}""",
+      andExpect = Ok,
+      withJsonBody = """{
+        "decision": "send",
+        "detail": "Flight UA654 is delayed 45 minutes",
+        "trace": [
+          "IdempotencyFilter: new event_id, proceeding",
+          "QuietHoursFilter: bypassed (transactional)",
+          "DecisionService: FlightDelayed 45 >= 30 minute threshold, sending",
+          "PriorityArbitrationFilter: no higher-priority competitor, recording send",
+          "FrequencyCapFilter: not capped, recording send"
+        ]
+      }"""
+    )
+  }
 }
