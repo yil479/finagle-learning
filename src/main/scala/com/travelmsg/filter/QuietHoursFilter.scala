@@ -36,15 +36,12 @@ class QuietHoursFilter extends SimpleFilter[TravelEvent, Decision] {
   private val QuietHoursStart = 21 // 9pm local time
   private val QuietHoursEnd = 8 // 8am local time
 
-  // TODO(me): return true if `now` falls within the quiet window. Deals
-  // only in already-resolved local time - no clock lookups here, which is
-  // what makes this trivially unit-testable (see below).
-  //
   // The window wraps past midnight (21:00 -> 08:00 the next day), so this
   // isn't a simple `QuietHoursStart <= hour && hour <= QuietHoursEnd` range
   // check - that would be true for no hours at all (nothing is both >= 21
-  // and <= 8). Think about what condition is true at both 23:00 and 03:00,
-  // but false at 14:00.
+  // and <= 8). True at both 23:00 and 03:00, false at 14:00. Deals only in
+  // already-resolved local time - no clock lookups here, which is what
+  // makes this trivially unit-testable (see below).
   private[filter] def isQuietHours(now: ZonedDateTime): Boolean = {
     val hour = now.getHour
     hour >= QuietHoursStart || hour < QuietHoursEnd
@@ -58,22 +55,19 @@ class QuietHoursFilter extends SimpleFilter[TravelEvent, Decision] {
   // wall-clock time entirely - see DecisionControllerFeatureTest.
   protected def currentTime(zoneId: ZoneId): ZonedDateTime = ZonedDateTime.now(zoneId)
 
-  // TODO(me): same bypass shape as FrequencyCapFilter - wrap this method's
-  // existing body in a `match` on `event`, with `case _: TransactionalEvent
-  // => service(event)` as the bypass case, and everything currently here
-  // as the fallback case. Remember to import TransactionalEvent.
   override def apply(event: TravelEvent, service: Service[TravelEvent, Decision]): Future[Decision] =
   event match {
     case _: BypassesQuietHours =>
-      Trace.record("QuietHoursFilter: bypassed (transactional)") 
+      Trace.record("QuietHoursFilter: bypassed (transactional)")
       service(event)
     case _ =>
       service(event).map {
         case send @ Send(_, _) =>
           val now = currentTime(ZoneId.of(event.timezone))
           if (isQuietHours(now)) {
-            Trace.record(s"QuietHoursFilter: currently quiet hours in ${event.timezone}, held")
-            Suppress(s"Quiet hours in ${event.timezone} - message held")
+            val suppress = Suppress(s"Quiet hours in ${event.timezone} - message held")
+            Trace.record(s"QuietHoursFilter: ${suppress.reason}")
+            suppress
           } else {
             Trace.record("QuietHoursFilter: not quiet hours, proceeding")
             send

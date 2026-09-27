@@ -36,11 +36,8 @@ class PriorityArbitrationFilter extends SimpleFilter[TravelEvent, Decision] {
   // TrieMap for the same reason as FrequencyCapFilter: concurrent requests.
   private val lastSentEvent = TrieMap.empty[String, (TravelEvent, Time)]
 
-  // TODO(me): Slice 6 adds FlightCancelled, ranked above everything else
-  // (it's transactional - always the most urgent thing competing for a
-  // traveler's attention). Add one more case here:
-  //   case _: FlightCancelled => 4
-  // and remember to add FlightCancelled to this file's import line.
+  // FlightCancelled ranks above everything else - it's transactional,
+  // always the most urgent thing competing for a traveler's attention.
   private def priorityOf(event: TravelEvent): Int = event match {
     case _: FlightCancelled => 4
     case _: FlightDelayed => 3
@@ -58,8 +55,9 @@ class PriorityArbitrationFilter extends SimpleFilter[TravelEvent, Decision] {
         lastSentEvent.get(travelerId) match {
           case Some((priorEvent, priorTime))
               if Time.now - priorTime < ArbitrationWindow && priorityOf(priorEvent) > priorityOf(event) =>
-              Trace.record(s"PriorityArbitrationFilter: lost to active ${priorEvent.getClass.getSimpleName}")
-              Suppress(s"Lower priority than an active ${priorEvent.getClass.getSimpleName} for this traveler")
+              val suppress = Suppress(s"Lower priority than an active ${priorEvent.getClass.getSimpleName} for this traveler")
+              Trace.record(s"PriorityArbitrationFilter: ${suppress.reason}")
+              suppress
           case _ =>
             Trace.record("PriorityArbitrationFilter: no higher-priority competitor, recording send")
             lastSentEvent.update(travelerId, (event, Time.now))

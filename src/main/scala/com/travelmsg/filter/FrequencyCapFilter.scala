@@ -34,24 +34,9 @@ class FrequencyCapFilter extends SimpleFilter[TravelEvent, Decision] {
   // race condition, not just a style nitpick.
   private val lastSentAt = TrieMap.empty[String, Time]
 
-  // TODO(me): Slice 6 - transactional events bypass frequency capping
-  // entirely, per CLAUDE.md's compliance rule. Wrap this whole method's
-  // existing body in a `match` on `event`, with a new first case:
-  //
-  //   override def apply(event: TravelEvent, service: Service[TravelEvent, Decision]): Future[Decision] =
-  //     event match {
-  //       case _: TransactionalEvent => service(event)
-  //       case _ =>
-  //         val travelerId = event.travelerId
-  //         ... everything that's currently in this method, unchanged ...
-  //     }
-  //
-  // Same type-pattern idiom as `priorityOf` in PriorityArbitrationFilter -
-  // `case _: TransactionalEvent` matches "is this a TransactionalEvent,"
-  // no field binding needed. Remember to import TransactionalEvent.
   override def apply(event: TravelEvent, service: Service[TravelEvent, Decision]): Future[Decision] =
   event match {
-    case _: BypassesFrequencyCap => 
+    case _: BypassesFrequencyCap =>
       Trace.record("FrequencyCapFilter: bypassed (transactional)")
       service(event)
     case _ =>
@@ -60,8 +45,9 @@ class FrequencyCapFilter extends SimpleFilter[TravelEvent, Decision] {
         case send @ Send(_, _) =>
           lastSentAt.get(travelerId) match {
             case Some(lastSent) if Time.now - lastSent < CapWindow =>
-              Trace.record(s"FrequencyCapFilter: capped, already sent within the last $CapWindow")
-              Suppress(s"Frequency capped: already sent to $travelerId within the last $CapWindow")
+              val suppress = Suppress(s"Frequency capped: already sent to $travelerId within the last $CapWindow")
+              Trace.record(s"FrequencyCapFilter: ${suppress.reason}")
+              suppress
             case _ =>
               Trace.record("FrequencyCapFilter: not capped, recording send")
               lastSentAt.update(travelerId, Time.now)

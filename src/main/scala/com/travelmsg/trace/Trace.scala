@@ -52,7 +52,12 @@ object Trace {
   def withRecording[R](fn: => R): R =
     Contexts.local.let(Key, new TraceRecorder)(fn)
 
-  def record(message: String): Unit =
+  // By-name `message`, not a plain String: every call site interpolates a
+  // string (e.g. s"...$travelerId...") that would otherwise get built on
+  // every real request even though it's thrown away immediately below on
+  // the non-dry-run path. By-name defers that work until - and unless -
+  // there's an active TraceRecorder to actually receive it.
+  def record(message: => String): Unit =
     Contexts.local.get(Key).foreach(_.record(message))
 
   def current: List[String] =

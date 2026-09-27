@@ -32,8 +32,9 @@ class DecisionService extends Service[TravelEvent, Decision] {
       Trace.record(s"DecisionService: FlightDelayed $delayMinutes >= $DelayThresholdMinutes minute threshold, sending")
       Future.value(Send(travelerId, MessageTemplates.messageFor(event)))
     } else {
-      Trace.record(s"DecisionService: FlightDelayed $delayMinutes < $DelayThresholdMinutes minute threshold, suppressing")
-      Future.value(Suppress(s"Delay of $delayMinutes minutes is under the $DelayThresholdMinutes-minute threshold"))
+      val suppress = Suppress(s"Delay of $delayMinutes minutes is under the $DelayThresholdMinutes-minute threshold")
+      Trace.record(s"DecisionService: ${suppress.reason}")
+      Future.value(suppress)
     }
 
     case PriceDropped(travelerId, tripId, oldPrice, newPrice, timezone, _) =>
@@ -44,12 +45,7 @@ class DecisionService extends Service[TravelEvent, Decision] {
       Trace.record("DecisionService: TripStartingSoon, unconditional send")
       Future.value(Send(travelerId, MessageTemplates.messageFor(event)))
 
-    // TODO(me): add a case for FlightCancelled here, once you've added it
-    // to TravelEvent.scala. Same unconditional-Send shape as PriceDropped
-    // and TripStartingSoon above - a cancellation is always worth sending,
-    // no threshold to check. Use MessageTemplates.messageFor(event) for
-    // the message, same as the other cases.
-    case FlightCancelled(travelerId, flightId, timezone, _) => 
+    case FlightCancelled(travelerId, flightId, timezone, _) =>
       Trace.record("DecisionService: FlightCancelled, unconditional send")
       Future.value(Send(travelerId, MessageTemplates.messageFor(event)))
     }

@@ -28,13 +28,8 @@ class DeliveryService @Inject() (
   private val pool: FuturePool = FuturePool.unboundedPool
   private val MaxAttempts = 3
 
-  // TODO(me): decide which Channel each event type uses. Per our design
-  // discussion: transactional events (for now, just FlightCancelled) go by
-  // SMS - more likely to be seen fast - everything else goes by email.
-  // Same "match on the event's type" idiom as `priorityOf` in
-  // PriorityArbitrationFilter - `case _: FlightCancelled => Channel.Sms`,
-  // with a fallback `case _ => Channel.Email` for everything else (you
-  // don't need to name every other event type individually).
+  // Transactional events (for now, just FlightCancelled) go by SMS - more
+  // likely to be seen fast - everything else goes by email.
   private def channelFor(event: TravelEvent): Channel = event match {
     case _: FlightCancelled => Channel.Sms
     case _ => Channel.Email
@@ -52,33 +47,37 @@ class DeliveryService @Inject() (
     }
 
   def deliver(event: TravelEvent, send: Send): Future[Decision] = {
-    pool { profileStore.find(event.travelerId) }.flatMap {
-      case None =>
+    // Profile and template lookups depend on nothing but `event` itself -
+    // neither needs the other's result - so they run concurrently via
+    // Future.join instead of one blocking round-trip waiting on the other.
+    val profileF = pool { profileStore.find(event.travelerId) }
+    val templateF = pool { templateStore.find(event.getClass.getSimpleName) }
+
+    Future.join(profileF, templateF).flatMap {
+      case (None, _) =>
         Future.value(Suppress("No contact info on file for traveler"))
-      case Some(profile) =>
-        pool { templateStore.find(event.getClass.getSimpleName) }.flatMap { templateOpt =>
-          // No error handling for a missing template: MessageTemplateStore
-          // seeds all four event types at startup, so this can't actually
-          // happen - trusting that invariant rather than guarding against
-          // a case that can't occur.
-          val template = templateOpt.get
-          val placeholders = MessageTemplates.placeholdersFor(event)
+      case (Some(profile), templateOpt) =>
+        // No error handling for a missing template: MessageTemplateStore
+        // seeds all four event types at startup, so this can't actually
+        // happen - trusting that invariant rather than guarding against
+        // a case that can't occur.
+        val template = templateOpt.get
+        val placeholders = MessageTemplates.placeholdersFor(event)
 
-          val attempt = channelFor(event) match {
-            case Channel.Email =>
-              val subject = MessageTemplates.render(template.emailSubject, placeholders)
-              val textBody = MessageTemplates.render(template.emailBodyText, placeholders)
-              val htmlBody = MessageTemplates.render(template.emailBodyHtml, placeholders)
-              pool { sender.sendEmail(profile.email, subject, textBody, htmlBody) }
-            case Channel.Sms =>
-              val smsBody = MessageTemplates.render(template.smsBody, placeholders)
-              pool { sender.sendSms(profile.phone, smsBody) }
-          }
-
-          withRetries(MaxAttempts)(attempt)
-            .map(_ => send)
-            .rescue { case NonFatal(e) => Future.value(Suppress(s"Delivery failed: ${e.getMessage}")) }
+        val attempt = channelFor(event) match {
+          case Channel.Email =>
+            val subject = MessageTemplates.render(template.emailSubject, placeholders)
+            val textBody = MessageTemplates.render(template.emailBodyText, placeholders)
+            val htmlBody = MessageTemplates.render(template.emailBodyHtml, placeholders)
+            pool { sender.sendEmail(profile.email, subject, textBody, htmlBody) }
+          case Channel.Sms =>
+            val smsBody = MessageTemplates.render(template.smsBody, placeholders)
+            pool { sender.sendSms(profile.phone, smsBody) }
         }
+
+        withRetries(MaxAttempts)(attempt)
+          .map(_ => send)
+          .rescue { case NonFatal(e) => Future.value(Suppress(s"Delivery failed: ${e.getMessage}")) }
     }
   }
 }
