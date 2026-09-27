@@ -1,5 +1,6 @@
 package com.travelmsg.delivery
 
+import com.travelmsg.config.AwsEndpoint
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.ses.SesClient
@@ -20,7 +21,7 @@ class MessageSender {
   private val FromAddress = "noreply@travelmsg.example.com"
 
   private val credentials = StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))
-  private val endpoint = URI.create("http://localhost:4566")
+  private val endpoint = URI.create(AwsEndpoint())
 
   private val sesClient: SesClient = SesClient
     .builder()

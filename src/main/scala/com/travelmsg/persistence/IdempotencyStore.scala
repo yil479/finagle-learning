@@ -1,5 +1,6 @@
 package com.travelmsg.persistence
 
+import com.travelmsg.config.AwsEndpoint
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient
@@ -29,7 +30,7 @@ class IdempotencyStore {
 
   private val client: DynamoDbClient = DynamoDbClient
     .builder()
-    .endpointOverride(URI.create("http://localhost:4566"))
+    .endpointOverride(URI.create(AwsEndpoint()))
     .region(Region.US_EAST_1)
     .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
     .build()
