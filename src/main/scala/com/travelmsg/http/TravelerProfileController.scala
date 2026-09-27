@@ -10,6 +10,8 @@ import javax.inject.{Inject, Singleton}
 
 case class RegisterProfileRequest(@RouteParam travelerId: String, email: String, phone: String)
 
+case class GetProfileRequest(@RouteParam travelerId: String)
+
 case class ProfileResponse(travelerId: String, email: String, phone: String)
 
 case class DecisionLogRequest(@RouteParam travelerId: String)
@@ -33,6 +35,12 @@ class TravelerProfileController @Inject() (profileStore: TravelerProfileStore, l
     pool {
       profileStore.save(TravelerProfile(request.travelerId, request.email, request.phone))
       ProfileResponse(request.travelerId, request.email, request.phone)
+    }
+  }
+
+  get("/travelers/:traveler_id/profile") { request: GetProfileRequest =>
+    pool {
+      profileStore.find(request.travelerId).map(p => ProfileResponse(p.travelerId, p.email, p.phone))
     }
   }
 
