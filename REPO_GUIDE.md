@@ -121,7 +121,12 @@ A production system will have `StatsReceiver` calls throughout (counters, gauges
 Expect to see metric names and trace annotations sprinkled through filters, the same way `Trace.record` is sprinkled through this project's filters — same idea, real infrastructure behind it.
 
 **Configuration is a first-class thing.**
-Instead of hardcoded values like this project's `http://localhost:4566`, expect command-line flags (via `com.twitter.util.App`'s `flag[...]` mechanism) or a config-fetching service, since the same binary typically runs in multiple environments (dev, staging, prod) with different settings.
+Expect command-line flags or a config-fetching service, since the same binary typically runs in multiple environments (dev, staging, prod) with different settings.
+This project actually demonstrates the mechanism now: `config/AwsEndpoint.scala` declares a `com.twitter.app.GlobalFlag[String]`, and every AWS SDK client reads it by calling `AwsEndpoint()` instead of hardcoding `http://localhost:4566`.
+That's a `GlobalFlag`, not a plain per-app `flag[...]` — the difference matters here: five unrelated, Guice-constructed classes all need this same value, and none of them are wired together by hand.
+A `GlobalFlag` is declared once, as a plain object, and read from anywhere with zero DI wiring — `AwsEndpoint()` works the same whether it's called from a Guice-constructed class or a test.
+A per-app `flag[...]` (declared inside a `com.twitter.app.App`/`TwitterServer` subclass) is the right tool instead when only that one app needs the value, e.g. the HTTP port to bind to.
+Try it yourself: `sbt "run -com.travelmsg.config.AwsEndpoint=http://localhost:1"` fails to connect (proving the flag is genuinely read, not ignored); the default (no flag passed) still points at LocalStack.
 
 ## What stays the same
 
